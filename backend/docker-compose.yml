@@ -1,4 +1,4 @@
-version: '3.8'
+version: "3.11"
 
 services:
   # PostgreSQL for metadata storage
@@ -49,7 +49,8 @@ services:
     volumes:
       - es_data:/usr/share/elasticsearch/data
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      test:
+        ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -63,7 +64,7 @@ services:
       RABBITMQ_DEFAULT_PASS: guest
     ports:
       - "5672:5672"
-      - "15672:15672"  # Management UI
+      - "15672:15672" # Management UI
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     healthcheck:
