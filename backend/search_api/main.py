@@ -143,7 +143,7 @@ async def search(
     if cached_result:
         result = json.loads(cached_result)
         result["cached"] = True
-        result["took_ms"] = (datetime.now() - start_time).microseconds // 1000
+        result["took_ms"] = int((datetime.now() - start_time).total_seconds() * 1000)
         
         # Log query
         _log_query(q, result["total"], result["took_ms"], cache_hit=True)
@@ -205,7 +205,7 @@ async def search(
     results = await _apply_pagerank_boost(results)
     
     # Calculate response time
-    response_time_ms = (datetime.now() - start_time).microseconds // 1000
+    response_time_ms = int((datetime.now() - start_time).total_seconds() * 1000)
     
     # Build response
     total_hits = es_response["hits"]["total"]["value"]
@@ -239,8 +239,9 @@ async def _apply_pagerank_boost(results: List[Dict]) -> List[Dict]:
     Combined score = 0.7 * TF-IDF + 0.3 * PageRank
     """
     for result in results:
-        # Fetch PageRank from Redis
-        url_hash = hashlib.md5(result["url"].encode()).hexdigest()
+        # Fetch PageRank from Redis - use first 16 chars of SHA256 hash
+        # This matches how pagerank.py stores the scores
+        url_hash = hashlib.sha256(result["url"].encode()).hexdigest()[:16]
         pr_key = f"pagerank:{url_hash}"
         pagerank = cache.get(pr_key)
         

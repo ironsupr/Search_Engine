@@ -138,6 +138,8 @@ services:
         condition: service_healthy
       elasticsearch:
         condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     volumes:
       - ./shared:/app/shared
       - ./indexer_service:/app/indexer_service

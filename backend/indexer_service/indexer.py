@@ -12,7 +12,7 @@ Features:
 
 import json
 import re
-import asyncio
+import time
 from typing import List, Optional, Dict
 from datetime import datetime
 from dataclasses import dataclass
@@ -24,6 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from shared.config import settings
 from shared.database import redis_manager, es_manager, db_manager
 from shared.utils import url_to_hash, format_timestamp
+from shared.message_queue import MessageConsumer, CRAWLED_PAGES_QUEUE, INDEXED_PAGES_QUEUE, publish_indexed_page
 
 # Try to import NLTK for text processing
 try:
@@ -32,18 +33,19 @@ try:
     from nltk.corpus import stopwords
     from nltk.tokenize import word_tokenize
     
-    # Download required data
-    try:
-        nltk.data.find('tokenizers/punkt')
-    except LookupError:
-        nltk.download('punkt', quiet=True)
-    try:
-        nltk.data.find('corpora/stopwords')
-    except LookupError:
-        nltk.download('stopwords', quiet=True)
+    # Download required NLTK data silently
+    nltk_resources = ['punkt', 'punkt_tab', 'stopwords']
+    for resource in nltk_resources:
+        try:
+            nltk.download(resource, quiet=True)
+        except Exception:
+            pass
     
     NLTK_AVAILABLE = True
 except ImportError:
+    NLTK_AVAILABLE = False
+except Exception:
+    # If NLTK fails for any reason, fall back to simple tokenization
     NLTK_AVAILABLE = False
 
 
@@ -137,13 +139,15 @@ class Indexer:
     Main indexer class that processes crawled pages
     """
     
-    def __init__(self):
+    def __init__(self, use_rabbitmq: bool = True):
         self.redis = redis_manager.connect()
         self.es = es_manager.connect()
         self.preprocessor = TextPreprocessor()
         
-        # Queue key (matching crawler output)
-        self.queue_key = "queue:indexing"
+        # Queue configuration
+        self.use_rabbitmq = use_rabbitmq
+        self.queue_key = "queue:indexing"  # Redis fallback queue
+        self.consumer = None
         
         # Stats
         self.pages_indexed = 0
@@ -356,6 +360,65 @@ class Indexer:
         """Main indexer loop"""
         print("📇 Indexer starting...")
         
+        if self.use_rabbitmq:
+            self._run_with_rabbitmq()
+        else:
+            self._run_with_redis(batch_mode, batch_size)
+    
+    def _run_with_rabbitmq(self):
+        """Run indexer with RabbitMQ consumer"""
+        print("🐰 Using RabbitMQ for message consumption")
+        
+        def handle_message(message: dict) -> bool:
+            """Process a message from RabbitMQ"""
+            try:
+                # Create document from message
+                doc = self._create_document(message)
+                
+                # Index to Elasticsearch
+                if self.index_document(doc):
+                    # Save metadata to PostgreSQL
+                    self.save_metadata(doc)
+                    
+                    # Notify PageRank service
+                    try:
+                        publish_indexed_page({
+                            "url": doc.url,
+                            "indexed_at": doc.indexed_at
+                        })
+                    except Exception:
+                        pass  # Non-critical
+                    
+                    self.pages_indexed += 1
+                    print(f"📄 Indexed: {doc.url[:70]}... ({self.pages_indexed} total)")
+                    return True
+                else:
+                    self.errors += 1
+                    return False
+                    
+            except Exception as e:
+                print(f"❌ Error processing message: {e}")
+                self.errors += 1
+                return False
+        
+        try:
+            self.consumer = MessageConsumer()
+            self.consumer.consume(CRAWLED_PAGES_QUEUE, handle_message)
+        except KeyboardInterrupt:
+            print("\n🛑 Indexer stopped")
+        except Exception as e:
+            print(f"❌ RabbitMQ error: {e}")
+            print("Falling back to Redis...")
+            self._run_with_redis(batch_mode=True, batch_size=50)
+        finally:
+            if self.consumer:
+                self.consumer.stop()
+            self._print_stats()
+    
+    def _run_with_redis(self, batch_mode: bool = True, batch_size: int = 50):
+        """Run indexer with Redis queue (fallback)"""
+        print("📕 Using Redis for message consumption")
+        
         try:
             while True:
                 queue_size = self.redis.llen(self.queue_key)
@@ -363,7 +426,7 @@ class Indexer:
                 if queue_size == 0:
                     # No items, wait
                     print("⏳ Queue empty, waiting...")
-                    asyncio.run(asyncio.sleep(5))
+                    time.sleep(5)
                     continue
                 
                 if batch_mode and queue_size >= batch_size:
@@ -392,12 +455,13 @@ def main():
     import argparse
     
     parser = argparse.ArgumentParser(description='Mini Search Engine Indexer')
-    parser.add_argument('--batch', action='store_true', help='Enable batch mode')
-    parser.add_argument('--batch-size', type=int, default=50, help='Batch size')
+    parser.add_argument('--batch', action='store_true', help='Enable batch mode (Redis only)')
+    parser.add_argument('--batch-size', type=int, default=50, help='Batch size (Redis only)')
+    parser.add_argument('--no-rabbitmq', action='store_true', help='Use Redis instead of RabbitMQ')
     
     args = parser.parse_args()
     
-    indexer = Indexer()
+    indexer = Indexer(use_rabbitmq=not args.no_rabbitmq)
     indexer.run(batch_mode=args.batch, batch_size=args.batch_size)
 
 

@@ -32,6 +32,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from shared.config import settings
 from shared.database import redis_manager, db_manager
 from shared.utils import url_to_hash, get_domain, is_valid_url, format_timestamp
+from shared.message_queue import MessageProducer, CRAWLED_PAGES_QUEUE
 
 # Constants
 USER_AGENT = "MiniSearchBot/1.0 (+https://github.com/your-repo)"
@@ -451,10 +452,23 @@ class WebCrawler:
         return max(0.0, priority)
     
     async def _publish_to_queue(self, page: CrawledPage):
-        """Publish crawled page to message queue for indexing"""
-        # Use Redis list as simple queue (RabbitMQ integration in B9)
-        queue_key = "queue:indexing"
-        self.redis.rpush(queue_key, page.to_json())
+        """Publish crawled page to RabbitMQ for indexing"""
+        try:
+            # Use RabbitMQ for reliable message delivery
+            producer = MessageProducer()
+            success = producer.publish(CRAWLED_PAGES_QUEUE, page.to_dict())
+            
+            if not success:
+                # Fallback to Redis if RabbitMQ fails
+                print(f"⚠️ RabbitMQ publish failed, using Redis fallback")
+                queue_key = "queue:indexing"
+                self.redis.rpush(queue_key, page.to_json())
+                
+        except Exception as e:
+            # Fallback to Redis on any error
+            print(f"⚠️ Message queue error: {e}, using Redis fallback")
+            queue_key = "queue:indexing"
+            self.redis.rpush(queue_key, page.to_json())
     
     async def _save_links(self, page: CrawledPage):
         """Save discovered links to database for PageRank"""
