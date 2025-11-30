@@ -1,3 +1,22 @@
 @import "tailwindcss";
 
 @custom-variant dark (&:where(.dark, .dark *));
+
+@layer utilities {
+  .animate-gradient-x {
+    background-size: 200% 200%;
+    animation: gradient-x 15s ease infinite;
+  }
+}
+
+@keyframes gradient-x {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+@layer base {
+  mark {
+    @apply bg-violet-200 dark:bg-violet-900/50 text-violet-900 dark:text-violet-100 px-1 rounded-md font-medium;
+  }
+}

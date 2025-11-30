@@ -135,16 +135,22 @@ class URLFrontier:
             self.redis.zadd(self.key, mapping)
     
     def pop(self) -> Optional[str]:
-        """Get and remove highest priority URL"""
-        result = self.redis.zpopmin(self.key, count=1)
+        """Get and remove highest priority URL (compatible with older Redis)"""
+        # Use ZRANGE + ZREM for Redis < 5.0 compatibility
+        result = self.redis.zrange(self.key, 0, 0)
         if result:
-            return result[0][0]  # (url, score) tuple
+            url = result[0]
+            self.redis.zrem(self.key, url)
+            return url
         return None
     
     def pop_batch(self, count: int = 10) -> List[str]:
-        """Get and remove multiple URLs"""
-        results = self.redis.zpopmin(self.key, count=count)
-        return [url for url, _ in results]
+        """Get and remove multiple URLs (compatible with older Redis)"""
+        # Use ZRANGE + ZREM for Redis < 5.0 compatibility
+        results = self.redis.zrange(self.key, 0, count - 1)
+        if results:
+            self.redis.zrem(self.key, *results)
+        return list(results)
     
     def size(self) -> int:
         """Get queue size"""
@@ -452,23 +458,13 @@ class WebCrawler:
         return max(0.0, priority)
     
     async def _publish_to_queue(self, page: CrawledPage):
-        """Publish crawled page to RabbitMQ for indexing"""
+        """Publish crawled page to Redis queue for indexing"""
         try:
-            # Use RabbitMQ for reliable message delivery
-            producer = MessageProducer()
-            success = producer.publish(CRAWLED_PAGES_QUEUE, page.to_dict())
-            
-            if not success:
-                # Fallback to Redis if RabbitMQ fails
-                print(f"⚠️ RabbitMQ publish failed, using Redis fallback")
-                queue_key = "queue:indexing"
-                self.redis.rpush(queue_key, page.to_json())
-                
-        except Exception as e:
-            # Fallback to Redis on any error
-            print(f"⚠️ Message queue error: {e}, using Redis fallback")
+            # Use Redis directly (simpler and works without RabbitMQ)
             queue_key = "queue:indexing"
             self.redis.rpush(queue_key, page.to_json())
+        except Exception as e:
+            print(f"⚠️ Failed to publish to queue: {e}")
     
     async def _save_links(self, page: CrawledPage):
         """Save discovered links to database for PageRank"""

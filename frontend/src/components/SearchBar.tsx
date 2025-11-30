@@ -200,14 +200,14 @@ export default function SearchBar({ onSearch, initialQuery = '', isLoading = fal
   }, []);
 
   return (
-    <div className="relative w-full max-w-2xl">
+    <div className="relative w-full max-w-3xl">
       <form onSubmit={handleSubmit}>
         <div
           className={`
             relative flex items-center transition-all duration-300
             ${isFocused 
-              ? 'ring-2 ring-blue-500/50 shadow-lg shadow-blue-500/20' 
-              : 'ring-1 ring-gray-200 dark:ring-gray-700 hover:ring-gray-300 dark:hover:ring-gray-600'
+              ? 'ring-2 ring-violet-500/50 shadow-lg shadow-violet-500/20 scale-[1.01]' 
+              : 'ring-1 ring-gray-200 dark:ring-gray-700 hover:ring-gray-300 dark:hover:ring-gray-600 hover:shadow-md'
             }
             bg-white dark:bg-gray-800 rounded-2xl overflow-hidden
           `}
@@ -215,10 +215,10 @@ export default function SearchBar({ onSearch, initialQuery = '', isLoading = fal
           {/* Search Icon / Loader */}
           <div className="pl-4 pr-2">
             {isLoading ? (
-              <Loader2 className="w-5 h-5 text-blue-500 animate-spin" />
+              <Loader2 className="w-5 h-5 text-violet-500 animate-spin" />
             ) : (
               <Search className={`w-5 h-5 transition-colors duration-200 ${
-                isFocused ? 'text-blue-500' : 'text-gray-400'
+                isFocused ? 'text-violet-500' : 'text-gray-400'
               }`} />
             )}
           </div>
@@ -283,7 +283,7 @@ export default function SearchBar({ onSearch, initialQuery = '', isLoading = fal
             className={`
               m-1.5 px-6 py-2.5 rounded-xl font-medium transition-all duration-200
               ${query.trim() && !isLoading
-                ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white hover:from-blue-600 hover:to-blue-700 shadow-md hover:shadow-lg'
+                ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white hover:from-violet-700 hover:to-fuchsia-700 shadow-md hover:shadow-lg'
                 : 'bg-gray-100 dark:bg-gray-700 text-gray-400 cursor-not-allowed'
               }
             `}
@@ -312,7 +312,7 @@ export default function SearchBar({ onSearch, initialQuery = '', isLoading = fal
                 </span>
                 <button
                   onClick={clearHistory}
-                  className="text-xs text-blue-500 hover:text-blue-600 font-medium"
+                  className="text-xs text-violet-500 hover:text-violet-600 font-medium"
                 >
                   Clear all
                 </button>
@@ -329,7 +329,7 @@ export default function SearchBar({ onSearch, initialQuery = '', isLoading = fal
                   className={`
                     w-full flex items-center gap-3 px-4 py-3 text-left transition-colors
                     ${selectedIndex === index 
-                      ? 'bg-blue-50 dark:bg-blue-900/30' 
+                      ? 'bg-violet-50 dark:bg-violet-900/20' 
                       : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'
                     }
                   `}
@@ -337,7 +337,7 @@ export default function SearchBar({ onSearch, initialQuery = '', isLoading = fal
                   {item.type === 'history' ? (
                     <Clock className="w-4 h-4 text-gray-400 flex-shrink-0" />
                   ) : (
-                    <TrendingUp className="w-4 h-4 text-blue-500 flex-shrink-0" />
+                    <TrendingUp className="w-4 h-4 text-violet-500 flex-shrink-0" />
                   )}
                   <span className="flex-1 text-gray-700 dark:text-gray-200 truncate">
                     {query.trim() ? (
@@ -392,7 +392,7 @@ function highlightMatch(text: string, query: string): React.ReactNode {
   
   return parts.map((part, index) => 
     part.toLowerCase() === query.toLowerCase() ? (
-      <mark key={index} className="bg-yellow-200 dark:bg-yellow-800 text-inherit rounded px-0.5">
+      <mark key={index} className="bg-fuchsia-100 dark:bg-fuchsia-900/50 text-fuchsia-900 dark:text-fuchsia-100 rounded px-0.5 font-medium">
         {part}
       </mark>
     ) : (

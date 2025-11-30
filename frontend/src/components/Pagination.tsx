@@ -15,7 +15,7 @@ export const Pagination: React.FC<PaginationProps> = ({ currentPage, totalPages,
     const maxVisiblePages = 5;
     
     let startPage = Math.max(1, currentPage - Math.floor(maxVisiblePages / 2));
-    let endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
+    const endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
     
     if (endPage - startPage + 1 < maxVisiblePages) {
       startPage = Math.max(1, endPage - maxVisiblePages + 1);
@@ -26,10 +26,10 @@ export const Pagination: React.FC<PaginationProps> = ({ currentPage, totalPages,
         <button
           key={i}
           onClick={() => onPageChange(i)}
-          className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-medium transition-colors ${
+          className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-medium transition-all duration-200 ${
             currentPage === i
-              ? 'bg-blue-600 text-white'
-              : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+              ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow-md shadow-violet-500/20 scale-110'
+              : 'text-gray-600 dark:text-gray-400 hover:bg-violet-50 dark:hover:bg-violet-900/20 hover:text-violet-600 dark:hover:text-violet-400'
           }`}
         >
           {i}

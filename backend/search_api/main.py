@@ -2,7 +2,7 @@
 Mini Search Engine - FastAPI Search Service
 """
 
-from fastapi import FastAPI, Query, HTTPException, Request
+from fastapi import FastAPI, Query, HTTPException, Request, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from elasticsearch import Elasticsearch
@@ -14,12 +14,19 @@ import hashlib
 from datetime import datetime
 import sys
 import os
+import asyncio
+import aiohttp
+from bs4 import BeautifulSoup
+from urllib.parse import urljoin, urlparse
+import re
+from pydantic import BaseModel, HttpUrl
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from shared.config import settings
 from shared.database import redis_manager, es_manager, db_manager
+from shared.utils import url_to_hash, format_timestamp
 
 # Global clients
 es = None
@@ -32,7 +39,7 @@ async def lifespan(app: FastAPI):
     global es, cache
     
     # Startup
-    print("🚀 Starting Mini Search Engine API...")
+    print("🚀 Starting EchoSearch API...")
     es = es_manager.connect()
     cache = redis_manager.connect()
     
@@ -85,8 +92,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Mini Search Engine API",
-    description="Distributed search engine with caching and ranking",
+    title="EchoSearch API",
+    description="Fast, private, intelligent search engine",
     version="1.0.0",
     lifespan=lifespan
 )
@@ -105,7 +112,7 @@ app.add_middleware(
 async def root():
     """Root endpoint"""
     return {
-        "service": "Mini Search Engine API",
+        "service": "EchoSearch API",
         "version": "1.0.0",
         "endpoints": {
             "search": "/search?q=query&page=1&size=10",
@@ -296,6 +303,266 @@ async def trigger_crawl(request: Request):
         }
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON")
+
+
+# ==================== Instant Crawl & Index ====================
+
+class CrawlIndexRequest(BaseModel):
+    """Request model for instant crawl and index"""
+    urls: List[str]
+    follow_links: bool = False
+    max_depth: int = 1
+
+
+class CrawlResult(BaseModel):
+    """Result for a single URL crawl"""
+    url: str
+    success: bool
+    title: Optional[str] = None
+    error: Optional[str] = None
+
+
+# Track crawl jobs
+crawl_jobs: Dict[str, dict] = {}
+
+
+async def fetch_and_index_url(url: str, session: aiohttp.ClientSession) -> CrawlResult:
+    """Fetch a URL and index it directly to Elasticsearch"""
+    try:
+        headers = {
+            'User-Agent': 'MiniSearchBot/1.0',
+            'Accept': 'text/html,application/xhtml+xml',
+            'Accept-Language': 'en-US,en;q=0.9'
+        }
+        
+        async with session.get(
+            url,
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=15),
+            allow_redirects=True,
+            max_redirects=5,
+            ssl=False  # Allow self-signed certs
+        ) as response:
+            
+            if response.status != 200:
+                return CrawlResult(url=url, success=False, error=f"HTTP {response.status}")
+            
+            content_type = response.headers.get('Content-Type', '')
+            if 'text/html' not in content_type.lower():
+                return CrawlResult(url=url, success=False, error=f"Not HTML: {content_type}")
+            
+            html = await response.text(errors='ignore')
+            
+            # Parse HTML
+            soup = BeautifulSoup(html, 'html.parser')
+            
+            # Remove script and style elements
+            for element in soup(['script', 'style', 'nav', 'footer', 'header', 'aside']):
+                element.decompose()
+            
+            # Extract title
+            title_tag = soup.find('title')
+            title = title_tag.get_text(strip=True) if title_tag else ''
+            
+            # Extract meta description
+            description = ''
+            meta_desc = soup.find('meta', attrs={'name': 'description'})
+            if meta_desc and meta_desc.get('content'):
+                description = meta_desc['content'].strip()
+            
+            # Extract body text
+            body = soup.find('body')
+            if body:
+                text = body.get_text(separator=' ', strip=True)
+                text = re.sub(r'\s+', ' ', text)
+            else:
+                text = soup.get_text(separator=' ', strip=True)
+                text = re.sub(r'\s+', ' ', text)
+            
+            # Get domain
+            domain = urlparse(str(response.url)).netloc
+            
+            # Create document ID
+            doc_id = url_to_hash(str(response.url))
+            
+            # Index to Elasticsearch
+            doc = {
+                "url": str(response.url),
+                "title": title[:500] if title else '',
+                "description": description[:1000] if description else '',
+                "content": text[:100000] if text else '',
+                "domain": domain,
+                "crawled_at": format_timestamp(),
+                "indexed_at": format_timestamp()
+            }
+            
+            es.index(
+                index=settings.elasticsearch_index,
+                id=doc_id,
+                document=doc
+            )
+            
+            # Extract links for follow_links option
+            links = []
+            for a_tag in soup.find_all('a', href=True):
+                href = a_tag['href'].strip()
+                if href and not href.startswith(('#', 'javascript:', 'mailto:', 'tel:')):
+                    absolute_url = urljoin(str(response.url), href)
+                    parsed = urlparse(absolute_url)
+                    if parsed.scheme in ('http', 'https'):
+                        links.append(absolute_url)
+            
+            return CrawlResult(url=str(response.url), success=True, title=title)
+            
+    except asyncio.TimeoutError:
+        return CrawlResult(url=url, success=False, error="Timeout")
+    except aiohttp.ClientError as e:
+        return CrawlResult(url=url, success=False, error=f"Connection error: {str(e)[:100]}")
+    except Exception as e:
+        return CrawlResult(url=url, success=False, error=f"Error: {str(e)[:100]}")
+
+
+async def crawl_and_index_batch(urls: List[str], job_id: str):
+    """Crawl and index a batch of URLs"""
+    crawl_jobs[job_id]["status"] = "running"
+    crawl_jobs[job_id]["started_at"] = datetime.now().isoformat()
+    
+    results = []
+    success_count = 0
+    
+    connector = aiohttp.TCPConnector(limit=5, limit_per_host=2)
+    async with aiohttp.ClientSession(connector=connector) as session:
+        # Process URLs with some concurrency
+        tasks = [fetch_and_index_url(url, session) for url in urls]
+        results = await asyncio.gather(*tasks)
+    
+    for result in results:
+        if result.success:
+            success_count += 1
+    
+    crawl_jobs[job_id]["status"] = "completed"
+    crawl_jobs[job_id]["completed_at"] = datetime.now().isoformat()
+    crawl_jobs[job_id]["results"] = [r.dict() for r in results]
+    crawl_jobs[job_id]["success_count"] = success_count
+    crawl_jobs[job_id]["failed_count"] = len(urls) - success_count
+
+
+@app.post("/crawl-index")
+async def crawl_and_index(request: CrawlIndexRequest, background_tasks: BackgroundTasks):
+    """
+    Instantly crawl and index a list of URLs.
+    
+    This endpoint fetches each URL, extracts content, and indexes it directly
+    to Elasticsearch without requiring the separate crawler/indexer services.
+    
+    Body:
+    {
+        "urls": ["https://example.com", "https://another.com"],
+        "follow_links": false,
+        "max_depth": 1
+    }
+    
+    Returns a job ID that can be used to check progress.
+    """
+    if not request.urls:
+        raise HTTPException(status_code=400, detail="No URLs provided")
+    
+    if len(request.urls) > 100:
+        raise HTTPException(status_code=400, detail="Maximum 100 URLs per request")
+    
+    # Validate URLs
+    valid_urls = []
+    for url in request.urls:
+        parsed = urlparse(url)
+        if parsed.scheme in ('http', 'https') and parsed.netloc:
+            valid_urls.append(url)
+    
+    if not valid_urls:
+        raise HTTPException(status_code=400, detail="No valid URLs provided")
+    
+    # Create job
+    job_id = hashlib.md5(f"{datetime.now().isoformat()}:{','.join(valid_urls)}".encode()).hexdigest()[:12]
+    
+    crawl_jobs[job_id] = {
+        "job_id": job_id,
+        "status": "pending",
+        "total_urls": len(valid_urls),
+        "urls": valid_urls,
+        "created_at": datetime.now().isoformat()
+    }
+    
+    # Run in background
+    background_tasks.add_task(crawl_and_index_batch, valid_urls, job_id)
+    
+    return {
+        "job_id": job_id,
+        "message": f"Crawling {len(valid_urls)} URLs in background",
+        "urls": valid_urls,
+        "check_status": f"/crawl-index/{job_id}"
+    }
+
+
+@app.get("/crawl-index/{job_id}")
+async def get_crawl_job_status(job_id: str):
+    """Get the status of a crawl-index job"""
+    if job_id not in crawl_jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    return crawl_jobs[job_id]
+
+
+@app.post("/crawl-index/sync")
+async def crawl_and_index_sync(request: CrawlIndexRequest):
+    """
+    Synchronously crawl and index URLs (waits for completion).
+    
+    Use this for small batches where you want immediate results.
+    For larger batches, use /crawl-index which runs in background.
+    
+    Body:
+    {
+        "urls": ["https://example.com"],
+        "follow_links": false
+    }
+    """
+    if not request.urls:
+        raise HTTPException(status_code=400, detail="No URLs provided")
+    
+    if len(request.urls) > 20:
+        raise HTTPException(status_code=400, detail="Maximum 20 URLs for sync mode. Use /crawl-index for larger batches.")
+    
+    # Validate URLs
+    valid_urls = []
+    for url in request.urls:
+        parsed = urlparse(url)
+        if parsed.scheme in ('http', 'https') and parsed.netloc:
+            valid_urls.append(url)
+    
+    if not valid_urls:
+        raise HTTPException(status_code=400, detail="No valid URLs provided")
+    
+    start_time = datetime.now()
+    results = []
+    success_count = 0
+    
+    connector = aiohttp.TCPConnector(limit=5, limit_per_host=2)
+    async with aiohttp.ClientSession(connector=connector) as session:
+        tasks = [fetch_and_index_url(url, session) for url in valid_urls]
+        results = await asyncio.gather(*tasks)
+    
+    for result in results:
+        if result.success:
+            success_count += 1
+    
+    elapsed_ms = int((datetime.now() - start_time).total_seconds() * 1000)
+    
+    return {
+        "total": len(valid_urls),
+        "success": success_count,
+        "failed": len(valid_urls) - success_count,
+        "took_ms": elapsed_ms,
+        "results": [r.dict() for r in results]
+    }
 
 
 @app.get("/health")
