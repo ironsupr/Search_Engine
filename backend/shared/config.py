@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     elasticsearch_host: str = "localhost"
     elasticsearch_port: int = 9200
     elasticsearch_index: str = "web_pages"
+    elasticsearch_user: Optional[str] = "elastic"
+    elasticsearch_password: Optional[str] = None
+    elasticsearch_use_ssl: bool = True
+    elasticsearch_verify_certs: bool = False
     
     # RabbitMQ
     rabbitmq_host: str = "localhost"
@@ -69,7 +73,10 @@ class Settings(BaseSettings):
     @property
     def elasticsearch_url(self) -> str:
         """Construct Elasticsearch connection URL"""
-        return f"http://{self.elasticsearch_host}:{self.elasticsearch_port}"
+        scheme = "https" if self.elasticsearch_use_ssl else "http"
+        if self.elasticsearch_user and self.elasticsearch_password:
+            return f"{scheme}://{self.elasticsearch_user}:{self.elasticsearch_password}@{self.elasticsearch_host}:{self.elasticsearch_port}"
+        return f"{scheme}://{self.elasticsearch_host}:{self.elasticsearch_port}"
     
     @property
     def rabbitmq_url(self) -> str:

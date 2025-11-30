@@ -90,7 +90,11 @@ class ElasticsearchManager:
     def connect(self):
         """Establish Elasticsearch connection"""
         if self._client is None:
-            self._client = Elasticsearch([settings.elasticsearch_url])
+            self._client = Elasticsearch(
+                [settings.elasticsearch_url],
+                verify_certs=settings.elasticsearch_verify_certs,
+                ssl_show_warn=False
+            )
         return self._client
     
     def close(self):
