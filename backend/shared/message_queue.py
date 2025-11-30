@@ -331,12 +331,19 @@ class MessageConsumer:
         """
         channel = self._connection.connect()
         
-        # Declare queue (idempotent)
+        # Declare queue with same settings as producer
         config = QueueConfig(name=queue_name)
+        
+        arguments = {}
+        if config.dead_letter_exchange:
+            arguments['x-dead-letter-exchange'] = config.dead_letter_exchange
+        if config.message_ttl:
+            arguments['x-message-ttl'] = config.message_ttl
         
         channel.queue_declare(
             queue=queue_name,
-            durable=True
+            durable=True,
+            arguments=arguments if arguments else None
         )
         
         channel.queue_bind(

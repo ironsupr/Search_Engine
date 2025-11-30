@@ -458,13 +458,18 @@ class WebCrawler:
         return max(0.0, priority)
     
     async def _publish_to_queue(self, page: CrawledPage):
-        """Publish crawled page to Redis queue for indexing"""
+        """Publish crawled page to RabbitMQ for indexing"""
         try:
-            # Use Redis directly (simpler and works without RabbitMQ)
+            # Try RabbitMQ first
+            from shared.message_queue import MessageProducer, CRAWLED_PAGES_QUEUE
+            producer = MessageProducer()
+            producer.publish(CRAWLED_PAGES_QUEUE, page.to_dict())
+            print(f"📤 Published to RabbitMQ: {page.url[:50]}...")
+        except Exception as e:
+            print(f"⚠️ RabbitMQ failed, using Redis fallback: {e}")
+            # Fallback to Redis queue
             queue_key = "queue:indexing"
             self.redis.rpush(queue_key, page.to_json())
-        except Exception as e:
-            print(f"⚠️ Failed to publish to queue: {e}")
     
     async def _save_links(self, page: CrawledPage):
         """Save discovered links to database for PageRank"""
