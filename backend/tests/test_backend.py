@@ -408,5 +408,116 @@ class TestMessageQueue:
         assert SEARCH_ENGINE_EXCHANGE == "search_engine"
 
 
+class TestTFIDF:
+    """Test TF-IDF algorithm implementation"""
+    
+    def test_term_frequency_raw(self):
+        """Test raw term frequency calculation"""
+        from ranking_service.tfidf import TermFrequency
+        
+        tokens = ['hello', 'world', 'hello', 'test', 'hello']
+        
+        assert TermFrequency.raw_tf('hello', tokens) == 3
+        assert TermFrequency.raw_tf('world', tokens) == 1
+        assert TermFrequency.raw_tf('missing', tokens) == 0
+    
+    def test_term_frequency_log(self):
+        """Test logarithmic term frequency"""
+        from ranking_service.tfidf import TermFrequency
+        import math
+        
+        tokens = ['hello', 'hello', 'hello']
+        
+        # log_tf = 1 + log10(count) for count > 0
+        expected = 1 + math.log10(3)
+        assert abs(TermFrequency.log_tf('hello', tokens) - expected) < 0.0001
+        assert TermFrequency.log_tf('missing', tokens) == 0.0
+    
+    def test_term_frequency_augmented(self):
+        """Test augmented term frequency"""
+        from ranking_service.tfidf import TermFrequency
+        
+        tokens = ['hello', 'hello', 'world']
+        
+        # augmented_tf = 0.5 + 0.5 * (count / max_count)
+        # hello: 0.5 + 0.5 * (2/2) = 1.0
+        # world: 0.5 + 0.5 * (1/2) = 0.75
+        assert TermFrequency.augmented_tf('hello', tokens) == 1.0
+        assert TermFrequency.augmented_tf('world', tokens) == 0.75
+    
+    def test_idf_calculation(self):
+        """Test IDF calculation"""
+        from ranking_service.tfidf import InverseDocumentFrequency
+        
+        idf_calc = InverseDocumentFrequency()
+        
+        # Add documents
+        idf_calc.add_document(['hello', 'world'])
+        idf_calc.add_document(['hello', 'test'])
+        idf_calc.add_document(['foo', 'bar'])
+        
+        assert idf_calc.total_docs == 3
+        assert idf_calc.doc_frequencies['hello'] == 2
+        assert idf_calc.doc_frequencies['world'] == 1
+    
+    def test_idf_smooth(self):
+        """Test smoothed IDF"""
+        from ranking_service.tfidf import InverseDocumentFrequency
+        import math
+        
+        idf_calc = InverseDocumentFrequency()
+        idf_calc.add_document(['hello', 'world'])
+        idf_calc.add_document(['hello', 'test'])
+        
+        # idf_smooth = log10((N + 1) / (df + 1))
+        # For 'hello' with N=2, df=2: log10(3/3) = 0
+        assert idf_calc.idf_smooth('hello') == 0.0
+        
+        # For 'world' with N=2, df=1: log10(3/2)
+        expected = math.log10(3/2)
+        assert abs(idf_calc.idf_smooth('world') - expected) < 0.0001
+    
+    def test_tfidf_calculator(self):
+        """Test full TF-IDF calculator"""
+        from ranking_service.tfidf import TFIDFCalculator
+        
+        calc = TFIDFCalculator()
+        
+        calc.add_document('doc1', 'The quick brown fox')
+        calc.add_document('doc2', 'The lazy brown dog')
+        calc.add_document('doc3', 'Quick fox jumps')
+        
+        assert calc.corpus_size == 3
+        assert calc.vocabulary_size > 0
+        
+        results = calc.score_query('quick fox')
+        assert len(results) > 0
+        # doc1 and doc3 should have highest scores (both have quick and fox)
+    
+    def test_query_processor(self):
+        """Test query processor"""
+        from ranking_service.tfidf import QueryProcessor
+        
+        processor = QueryProcessor()
+        
+        parsed = processor.parse_query('hello world')
+        assert 'terms' in parsed
+        assert len(parsed['terms']) > 0
+    
+    def test_text_preprocessor(self):
+        """Test text preprocessor"""
+        from ranking_service.tfidf import TextPreprocessor
+        
+        preprocessor = TextPreprocessor()
+        
+        tokens = preprocessor.tokenize('Hello World! This is a TEST.')
+        
+        # Should be lowercase
+        assert all(t.islower() or t.isdigit() for t in tokens)
+        # Should remove stopwords
+        assert 'is' not in tokens
+        assert 'a' not in tokens
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
