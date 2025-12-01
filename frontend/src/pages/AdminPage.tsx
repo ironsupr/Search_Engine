@@ -3,6 +3,9 @@ import { motion } from 'framer-motion';
 import { Terminal, Play, CheckCircle, XCircle, Loader2, Shield, Lock } from 'lucide-react';
 import { ThemeToggle } from '../components/ThemeToggle';
 
+// In Docker, VITE_API_URL is empty, so we use relative URLs (nginx proxies to backend)
+const API_URL = import.meta.env.VITE_API_URL || '';
+
 interface CrawlResult {
   url: string;
   success: boolean;
@@ -46,7 +49,7 @@ export const AdminPage: React.FC = () => {
     const urlList = urls.split('\n').map(u => u.trim()).filter(u => u);
 
     try {
-      const response = await fetch('http://localhost:8000/crawl-index/sync', {
+      const response = await fetch(`${API_URL}/crawl-index/sync`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ urls: urlList })

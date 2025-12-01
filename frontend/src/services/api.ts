@@ -1,7 +1,9 @@
 import axios from 'axios';
 import type { SearchResponse } from '../types';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+// In Docker, VITE_API_URL is empty, so we use relative URLs (nginx proxies to backend)
+// In development, it defaults to localhost:8000
+const API_URL = import.meta.env.VITE_API_URL || '';
 
 const api = axios.create({
   baseURL: API_URL,
