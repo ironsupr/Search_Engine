@@ -2,3 +2,5 @@ Theory
 .github
 *.md
 *.pdf
+
+!Readme.md
