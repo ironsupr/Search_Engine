@@ -2,7 +2,7 @@ services:
   # ===========================================
   # Infrastructure Services
   # ===========================================
-  
+
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
     container_name: echosearch-elasticsearch
@@ -25,7 +25,11 @@ services:
     networks:
       - echosearch-network
     healthcheck:
-      test: ["CMD-SHELL", "curl -s -u elastic:${ELASTIC_PASSWORD:-elastic123} http://localhost:9200/_cluster/health | grep -q '\"status\":\"green\"\\|\"status\":\"yellow\"'"]
+      test:
+        [
+          "CMD-SHELL",
+          "curl -s -u elastic:${ELASTIC_PASSWORD:-elastic123} http://localhost:9200/_cluster/health | grep -q '\"status\":\"green\"\\|\"status\":\"yellow\"'",
+        ]
       interval: 30s
       timeout: 10s
       retries: 10
@@ -63,7 +67,11 @@ services:
     networks:
       - echosearch-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-searchdb}"]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-searchdb}",
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
